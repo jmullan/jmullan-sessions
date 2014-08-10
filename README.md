@@ -1,4 +1,4 @@
-B0;136;0cPHP MySQL Session Handler
+PHP MySQL Session Handler
 ========================
 
 Based on a fork of:
