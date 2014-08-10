@@ -6,9 +6,6 @@ php:
   - hhvm
 install:
   - composer install
-matrix:
-  allow_failures:
-    - php: "hhvm"
 script:
   - ./vendor/bin/phpcs --standard=PSR2 src
 
