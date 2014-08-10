@@ -5,15 +5,14 @@ namespace Jmullan\Sessions;
  * A PHP session handler to keep session data within a MySQL database
  */
 
-class Handler
+class Handler implements \SessionHandlerInterface
 {
 
     /**
      * a database MySQLi connection resource
      * @var resource
      */
-    protected $dbConnection;
-
+    protected $db;
 
     /**
      * the name of the DB table which handles the sessions
@@ -21,7 +20,7 @@ class Handler
      */
     protected $dbTable;
 
-
+    protected $session_name;
 
     /**
      * Set db data if no connection is being injected
@@ -30,68 +29,45 @@ class Handler
      * @param	string	$dbPassword
      * @param	string	$dbDatabase
      */
-    public function setDbDetails($dbHost, $dbUser, $dbPassword, $dbDatabase)
+    public function setDbDetails($dsn, $username, $password, $options = array())
     {
-
         //create db connection
-        $this->dbConnection = new mysqli($dbHost, $dbUser, $dbPassword, $dbDatabase);
-
-        //check connection
-        if (mysqli_connect_error()) {
-            throw new Exception('Connect Error (' . mysqli_connect_errno() . ') ' . mysqli_connect_error());
-        }//if
-
-    }//function
-
-
-
-    /**
-     * Inject DB connection from outside
-     * @param 	object	$dbConnection	expects MySQLi object
-     */
-    public function setDbConnection($dbConnection)
-    {
-
-        $this->dbConnection = $dbConnection;
-
+        $this->setDbConnection(new \PDO($dsn, $username, $password, $options));
     }
 
+    /**
+     * Inject DB connection from outside
+     * @param 	object	$db	expects MySQLi object
+     */
+    public function setDbConnection($db)
+    {
+        $this->db = $db;
+    }
 
     /**
      * Inject DB connection from outside
-     * @param 	object	$dbConnection	expects MySQLi object
+     * @param 	object	$db	expects MySQLi object
      */
     public function setDbTable($dbTable)
     {
-
         $this->dbTable = $dbTable;
-
     }
-
 
     /**
      * Open the session
      * @return bool
      */
-    public function open()
+    public function open($save_path, $session_name)
     {
-
-        //delete old session handlers
-        $limit = time() - (3600 * 24);
-        $sql = sprintf("DELETE FROM %s WHERE timestamp < %s", $this->dbTable, $limit);
-        return $this->dbConnection->query($sql);
-
+        $this->session_name = $session_name;
     }
 
     /**
      * Close the session
-     * @return bool
      */
     public function close()
     {
-
-        return $this->dbConnection->close();
-
+        $this->db = null;
     }
 
     /**
@@ -99,22 +75,21 @@ class Handler
      * @param int session id
      * @return string string of the sessoin
      */
-    public function read($id)
+    public function read($session_id)
     {
-
-        $sql = sprintf("SELECT data FROM %s WHERE id = '%s'", $this->dbTable, $this->dbConnection->escape_string($id));
-        if ($result = $this->dbConnection->query($sql)) {
-            if ($result->num_rows && $result->num_rows > 0) {
-                $record = $result->fetch_assoc();
-                return $record['data'];
-            } else {
-                return false;
+        $data = '';
+        $query = sprintf("SELECT `data` FROM %s WHERE `session_name` = ? AND `session_id` = ?", $this->dbTable);
+        $prepared = $this->db->prepare($query);
+        $result = $prepared->execute(array($this->session_name, $session_id));
+        if ($result) {
+            $data = $prepared->fetchColumn(0);
+            $prepared->closeCursor();
+            unset($prepared);
+            if ($data === null) {
+                $data = '';
             }
-        } else {
-            return false;
         }
-        return true;
-
+        return $data;
     }
 
 
@@ -123,18 +98,23 @@ class Handler
      * @param int session id
      * @param string data of the session
      */
-    public function write($id, $data)
+    public function write($session_id, $data)
     {
-
-        $sql = sprintf(
-            "REPLACE INTO %s VALUES('%s', '%s', '%s')",
-            $this->dbTable,
-            $this->dbConnection->escape_string($id),
-            $this->dbConnection->escape_string($data),
-            time()
-        );
-        return $this->dbConnection->query($sql);
-
+        if ($data === '' || $data === null) {
+            $this->destroy($session_id);
+            return true;
+        }
+        $sql = "
+             INSERT INTO %s (`session_name`, `session_id`, `data`)
+             VALUES(?, ?, ?)
+             ON DUPLICATE KEY UPDATE `data` = VALUES(`data`), `update_count` = `update_count` + 1
+        ";
+        $query = sprintf($sql, $this->dbTable);
+        $prepared = $this->db->prepare($query);
+        $result = $prepared->execute(array($this->session_name, $session_id, $data));
+        $prepared->closeCursor();
+        unset($prepared);
+        return $result;
     }
 
     /**
@@ -142,29 +122,41 @@ class Handler
      * @param int session id
      * @return bool
      */
-    public function destroy($id)
+    public function destroy($session_id)
     {
-        $sql = sprintf("DELETE FROM %s WHERE `id` = '%s'", $this->dbTable, $this->dbConnection->escape_string($id));
-        return $this->dbConnection->query($sql);
-
+        $query = sprintf("DELETE FROM %s WHERE `session_name` = ? AND `session_id` = ?", $this->dbTable);
+        $prepared = $this->db->prepare($query);
+        $result = $prepared->execute(array($this->session_name, $session_id));
+        $prepared->closeCursor();
+        unset($prepared);
+        return $result;
     }
-
-
 
     /**
      * Garbage Collector
      * @param int life time (sec.)
      * @return bool
-     * @see session.gc_divisor      100
      * @see session.gc_maxlifetime 1440
-     * @see session.gc_probability    1
-     * @usage execution rate 1/100
-     *        (session.gc_probability/session.gc_divisor)
      */
     public function gc($max)
     {
-        $sql = sprintf("DELETE FROM %s WHERE `timestamp` < '%s'", $this->dbTable, time() - intval($max));
-        return $this->dbConnection->query($sql);
+        $query = sprintf("DELETE FROM %s WHERE `mtime` < NOW() - INTERVAL ? SECOND", $this->dbTable);
+        $prepared = $this->db->prepare($query);
+        $result1 = $prepared->execute(array($max));
+        $prepared->closeCursor();
+        unset($prepared);
 
+        $prune = "
+             DELETE FROM %s
+             WHERE
+                 `mtime` < NOW() - INTERVAL 1 HOUR
+                 AND (data = '' OR data IS null)
+        ";
+        $query = sprintf($prune, $this->dbTable);
+        $prepared = $this->db->prepare($query);
+        $result2 = $prepared->execute(array($max));
+        $prepared->closeCursor();
+        unset($prepared);
+        return $result1 && $result2;
     }
 }

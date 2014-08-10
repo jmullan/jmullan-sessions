@@ -1,4 +1,4 @@
-PHP MySQL Session Handler
+B0;136;0cPHP MySQL Session Handler
 ========================
 
 Based on a fork of:
@@ -9,15 +9,7 @@ Installation
 
 Composer
 
-First you need to create a table in your database:
-
-    CREATE TABLE `session_handler_table` (
-    `id` varchar(255) NOT NULL,
-    `data` mediumtext NOT NULL,
-    `timestamp` int(255) NOT NULL,
-    PRIMARY KEY (`id`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-
+First you need to create a table in your database, see schema.sql
 
 Then have a look at example.php
 Easy!
