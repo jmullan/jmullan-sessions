@@ -1,8 +1,13 @@
 PHP MySQL Session Handler
 ========================
 
+Based on a fork of:
+https://github.com/sprain/PHP-MySQL-Session-Handler
+
 Installation
 ----------------------------
+
+Composer
 
 First you need to create a table in your database:
 
@@ -16,3 +21,4 @@ First you need to create a table in your database:
 
 Then have a look at example.php
 Easy!
+

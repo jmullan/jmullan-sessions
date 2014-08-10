@@ -1,0 +1,10 @@
+*~
+*.DS_Store
+#*
+.idea/*
+*.bak
+*flymake.php
+*.ini
+vendor
+composer.lock
+.lookHere
